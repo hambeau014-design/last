@@ -91,7 +91,7 @@ struct thread
     char name[16];             /* Name (for debugging purposes). */
     uint8_t *stack;            /* Saved stack pointer. */
     int priority;              /* Priority. */
-    int age;                /* Aging counter */
+    //int age;                /* Aging counter */
     int queue_level;      /* 현재 큐 레벨 (0, 1, 2) */
     int age[3];           /* 각 큐별 대기 시간 */
     struct list_elem allelem;  /* List element for all threads list. */
