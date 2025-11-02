@@ -249,16 +249,23 @@ thread_block (void)
 void
 thread_unblock (struct thread *t) {
   enum intr_level old_level;
+
   ASSERT (is_thread (t));
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
 
-  t->queue_level = 0;   // 새 스레드는 항상 Q0부터 시작
-  t->age[0] = t->age[1] = t->age[2] = 0;
-
-  list_push_back(&mlfq[0], &t->elem);
+  /* 🔹 MLFQ 버전: ready_list 대신 큐 삽입 */
   t->status = THREAD_READY;
+  t->age[0] = t->age[1] = t->age[2] = 0;
+  t->queue_level = 0; // 새 스레드는 항상 최상위 큐(Q0)에서 시작
+
+  list_push_back(&mlfq[0], &t->elem); // Q0 큐에 삽입
+
+  /* 🔹 선점 조건: 현재 실행 중인 스레드보다 상위 큐가 있다면 양보 */
+  if (thread_current() != idle_thread &&
+      thread_current()->queue_level > t->queue_level)
+    thread_yield();
 
   intr_set_level (old_level);
 }
