@@ -184,6 +184,7 @@ thread_create (const char *name, int priority,
     /* Initialize thread. */
     init_thread (t, name, priority);
     tid = t->tid = allocate_tid ();
+   t->age=0;
 
     /* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
@@ -247,12 +248,13 @@ thread_unblock (struct thread *t) {
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
 
-  /* 기존: list_push_back(&ready_list, &t->elem); */
-  list_insert_ordered(&ready_list, &t->elem, thread_cmp_priority, NULL);
+  /* 🔹 대기 상태로 돌아올 때 age 초기화 */
+  t->age = 0;
 
+  list_insert_ordered(&ready_list, &t->elem, thread_cmp_priority, NULL);
   t->status = THREAD_READY;
 
-  /* 현재 실행 중인 스레드보다 우선순위가 높다면 즉시 양보 */
+  /* 더 높은 우선순위가 있으면 양보 */
   if (thread_current() != idle_thread &&
       t->priority > thread_current()->priority)
     thread_yield();
