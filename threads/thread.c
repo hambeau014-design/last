@@ -59,6 +59,9 @@ static unsigned thread_ticks; /* # of timer ticks since last yield. */
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
 
+/* 다단계 피드백 큐 (MLFQ) — Q0, Q1, Q2 */
+struct list mlfq[3];
+
 static void kernel_thread (thread_func *, void *aux);
 
 static void idle (void *aux UNUSED);
@@ -94,6 +97,9 @@ thread_init (void)
     lock_init (&tid_lock);
     list_init (&ready_list);
     list_init (&all_list);
+    list_init(&mlfq[0]);
+    list_init(&mlfq[1]);
+    list_init(&mlfq[2]);
 
     /* Set up a thread structure for the running thread. */
     initial_thread = running_thread ();
