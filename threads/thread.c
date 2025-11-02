@@ -70,6 +70,7 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+bool thread_cmp_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -236,19 +237,29 @@ thread_block (void)
    be important: if the caller had disabled interrupts itself,
    it may expect that it can atomically unblock a thread and
    update other data. */
+/* ready_list에 스레드를 우선순위 순으로 삽입 */
 void
-thread_unblock (struct thread *t)
-{
-    enum intr_level old_level;
+thread_unblock (struct thread *t) {
+  enum intr_level old_level;
 
-    ASSERT (is_thread (t));
+  ASSERT (is_thread (t));
 
-    old_level = intr_disable ();
-    ASSERT (t->status == THREAD_BLOCKED);
-    list_push_back (&ready_list, &t->elem);
-    t->status = THREAD_READY;
-    intr_set_level (old_level);
+  old_level = intr_disable ();
+  ASSERT (t->status == THREAD_BLOCKED);
+
+  /* 기존: list_push_back(&ready_list, &t->elem); */
+  list_insert_ordered(&ready_list, &t->elem, thread_cmp_priority, NULL);
+
+  t->status = THREAD_READY;
+
+  /* 현재 실행 중인 스레드보다 우선순위가 높다면 즉시 양보 */
+  if (thread_current() != idle_thread &&
+      t->priority > thread_current()->priority)
+    thread_yield();
+
+  intr_set_level (old_level);
 }
+
 
 /* Returns the name of the running thread. */
 const char *
@@ -341,9 +352,14 @@ thread_foreach (thread_action_func *func, void *aux)
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
-thread_set_priority (int new_priority)
-{
-    thread_current ()->priority = new_priority;
+thread_set_priority (int new_priority) {
+  struct thread *cur = thread_current();
+  int old_priority = cur->priority;
+  cur->priority = new_priority;
+
+  /* 우선순위가 낮아진 경우, 선점 발생 */
+  if (new_priority < old_priority)
+    thread_yield();
 }
 
 /* Returns the current thread's priority. */
@@ -585,3 +601,14 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+/* ready_list 정렬용 비교 함수 */
+bool
+thread_cmp_priority (const struct list_elem *a,
+                     const struct list_elem *b,
+                     void *aux UNUSED) {
+  struct thread *t_a = list_entry(a, struct thread, elem);
+  struct thread *t_b = list_entry(b, struct thread, elem);
+  return t_a->priority > t_b->priority;  // 높은 우선순위가 앞쪽
+}
+
