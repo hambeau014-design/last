@@ -24,6 +24,9 @@ typedef int tid_t;
 #define PRI_DEFAULT 31 /* Default priority. */
 #define PRI_MAX 63     /* Highest priority. */
 
+/* 다단계 피드백 큐 (MLFQ) — Q0, Q1, Q2 */
+struct list mlfq[3];
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -89,6 +92,8 @@ struct thread
     uint8_t *stack;            /* Saved stack pointer. */
     int priority;              /* Priority. */
     int age;                /* Aging counter */
+    int queue_level;      /* 현재 큐 레벨 (0, 1, 2) */
+    int age[3];           /* 각 큐별 대기 시간 */
     struct list_elem allelem;  /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
