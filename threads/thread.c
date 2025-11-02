@@ -71,6 +71,7 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 bool thread_cmp_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+void aging_ready_threads(void);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -242,22 +243,16 @@ thread_block (void)
 void
 thread_unblock (struct thread *t) {
   enum intr_level old_level;
-
   ASSERT (is_thread (t));
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
 
-  /* 🔹 대기 상태로 돌아올 때 age 초기화 */
-  t->age = 0;
+  t->queue_level = 0;   // 새 스레드는 항상 Q0부터 시작
+  t->age[0] = t->age[1] = t->age[2] = 0;
 
-  list_insert_ordered(&ready_list, &t->elem, thread_cmp_priority, NULL);
+  list_push_back(&mlfq[0], &t->elem);
   t->status = THREAD_READY;
-
-  /* 더 높은 우선순위가 있으면 양보 */
-  if (thread_current() != idle_thread &&
-      t->priority > thread_current()->priority)
-    thread_yield();
 
   intr_set_level (old_level);
 }
@@ -509,12 +504,12 @@ alloc_frame (struct thread *t, size_t size)
    will be in the run queue.)  If the run queue is empty, return
    idle_thread. */
 static struct thread *
-next_thread_to_run (void)
-{
-    if (list_empty (&ready_list))
-        return idle_thread;
-    else
-        return list_entry (list_pop_front (&ready_list), struct thread, elem);
+next_thread_to_run(void) {
+  for (int i = 0; i < 3; i++) {
+    if (!list_empty(&mlfq[i]))
+      return list_entry(list_pop_front(&mlfq[i]), struct thread, elem);
+  }
+  return idle_thread;
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -612,5 +607,78 @@ thread_cmp_priority (const struct list_elem *a,
   struct thread *t_a = list_entry(a, struct thread, elem);
   struct thread *t_b = list_entry(b, struct thread, elem);
   return t_a->priority > t_b->priority;  // 높은 우선순위가 앞쪽
+}
+
+void
+aging_ready_threads(void) {
+  struct list_elem *e;
+
+  /* ready_list의 모든 스레드에 대해 age 증가 */
+  for (e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next(e)) {
+    struct thread *t = list_entry(e, struct thread, elem);
+    t->age++;
+
+    /* 일정 나이(age) 도달 시 우선순위 상승 */
+    if (t->age >= 20) {
+      if (t->priority < PRI_MAX)
+        t->priority++;
+      t->age = 0;
+    }
+  }
+
+  /* 🔹 우선순위가 변경되었을 수 있으므로 정렬 유지 */
+  list_sort(&ready_list, thread_cmp_priority, NULL);
+
+  /* 🔹 여기서 선점 처리 (6번 내용) */
+  struct thread *cur = thread_current();
+  if (!list_empty(&ready_list)) {
+    struct thread *front = list_entry(list_front(&ready_list), struct thread, elem);
+    if (front->priority > cur->priority)
+      thread_yield();
+  }
+}
+
+#define TIME_SLICE_Q0 2
+#define TIME_SLICE_Q1 4
+#define TIME_SLICE_Q2 8
+#define AGE_LIMIT     20
+
+void
+mlfq_update(void) {
+  struct thread *cur = thread_current();
+
+  /* 현재 스레드가 너무 오래 실행 중이면 하위 큐로 이동 */
+  if (cur != idle_thread) {
+    cur->recent_cpu++;
+    int slice_limit =
+      (cur->queue_level == 0) ? TIME_SLICE_Q0 :
+      (cur->queue_level == 1) ? TIME_SLICE_Q1 : TIME_SLICE_Q2;
+
+    if (cur->recent_cpu >= slice_limit) {
+      if (cur->queue_level < 2)
+        cur->queue_level++;
+      cur->recent_cpu = 0;
+      thread_yield();
+    }
+  }
+
+  /* 모든 ready 스레드에 대해 에이징 적용 */
+  for (int i = 0; i < 3; i++) {
+    struct list_elem *e = list_begin(&mlfq[i]);
+    while (e != list_end(&mlfq[i])) {
+      struct thread *t = list_entry(e, struct thread, elem);
+      t->age[i]++;
+
+      /* age가 일정 시간 이상이면 상위 큐로 승급 */
+      if (t->age[i] >= AGE_LIMIT && t->queue_level > 0) {
+        e = list_remove(e);
+        t->queue_level--;
+        t->age[i] = 0;
+        list_push_back(&mlfq[t->queue_level], &t->elem);
+      } else {
+        e = list_next(e);
+      }
+    }
+  }
 }
 
